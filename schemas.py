@@ -55,5 +55,5 @@ class Ticker(BaseModel):
         ]
 
     @property
-    def headers(self) -> list[str]:
+    def fieldnames(self) -> list[str]:
         return ["date", "open", "high", "low", "close", "adj_close", "volume"]

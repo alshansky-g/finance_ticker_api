@@ -1,3 +1,4 @@
 /tickers
 /sandbox.py
-**__pycache__
+__pycache__
+/logs

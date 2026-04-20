@@ -51,31 +51,31 @@ def get_history_data(
     return response.json()
 
 
-def worker(ticker: str, queue: Queue):
+def worker(ticker_name: str, queue: Queue):
     try:
-        ticker_model = Ticker.model_validate(
-            get_history_data(ticker=ticker, start_date=START_DATE, end_date=END_DATE)
+        ticker = Ticker.model_validate(
+            get_history_data(ticker=ticker_name, start_date=START_DATE, end_date=END_DATE)
         )
-        queue.put(ticker_model)
+        queue.put(ticker)
     except requests.RequestException as e:
-        logger.error("Проблема с сетью при обработке %s: %s", ticker_model.symbol, e)
+        logger.error("Проблема с сетью при обработке %s: %s", ticker.symbol, e)
     except Exception as e:
-        logger.error("Не получилось обработать %s: %s", ticker_model.symbol, e)
+        logger.error("Не получилось обработать %s: %s", ticker.symbol, e)
 
 
 def csv_writer(queue: Queue):
     Path("tickers").mkdir(parents=True, exist_ok=True)
     while True:
         try:
-            model: Ticker = queue.get()
-            if model is None:
+            ticker: Ticker = queue.get()
+            if ticker is None:
                 break
-            
-            with open(f"tickers/{model.symbol}.csv", "w", newline="") as file:
-                writer = DictWriter(file, fieldnames=model.headers)
+
+            with open(f"tickers/{ticker.symbol}.csv", "w", newline="") as file:
+                writer = DictWriter(file, fieldnames=ticker.fieldnames)
                 writer.writeheader()
-                writer.writerows(model.to_rows())
-                logger.info("%s записан в tickers/%s.csv", model.symbol, model.symbol)
+                writer.writerows(ticker.to_rows())
+                logger.info("%s записан в tickers/%s.csv", ticker.symbol, ticker.symbol)
         except Exception as e:
             logger.error("Ошибка во время записи в csv: %s", e)
         finally:
