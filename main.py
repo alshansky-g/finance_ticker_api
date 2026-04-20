@@ -6,8 +6,11 @@ from pathlib import Path
 from queue import Queue
 from threading import Thread
 import requests
+from config_logging import get_logger
 from schemas import Ticker
 
+
+logger = get_logger(__name__)
 
 TICKERS_FILE = "tickers.txt"
 BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
@@ -33,13 +36,9 @@ def get_history_data(
     :param interval: str, интервал времени (неделя, день и т.д.) (необязательный, по умолчанию '1wk' - одна неделя).
     :return: str, JSON-строка с историческими данными.
     """
-    per2 = int(
-        datetime.strptime(end_date, "%d.%m.%y").replace(tzinfo=UTC).timestamp()
-    )
+    per2 = int(datetime.strptime(end_date, "%d.%m.%y").replace(tzinfo=UTC).timestamp())
     per1 = int(
-        datetime.strptime(start_date, "%d.%m.%y")
-        .replace(tzinfo=UTC)
-        .timestamp()
+        datetime.strptime(start_date, "%d.%m.%y").replace(tzinfo=UTC).timestamp()
     )
     params = {
         "period1": str(per1),
@@ -53,10 +52,15 @@ def get_history_data(
 
 
 def worker(ticker: str, queue: Queue):
-    ticker_model = Ticker.model_validate(
-        get_history_data(ticker=ticker, start_date=START_DATE, end_date=END_DATE)
-    )
-    queue.put(ticker_model)
+    try:
+        ticker_model = Ticker.model_validate(
+            get_history_data(ticker=ticker, start_date=START_DATE, end_date=END_DATE)
+        )
+        queue.put(ticker_model)
+    except requests.RequestException as e:
+        logger.error("Проблема с сетью при обработке %s: %s", ticker_model.symbol, e)
+    except Exception as e:
+        logger.error("Не получилось обработать %s: %s", ticker_model.symbol, e)
 
 
 def csv_writer(queue: Queue):
@@ -68,7 +72,7 @@ def csv_writer(queue: Queue):
                 writer = DictWriter(file, fieldnames=model.headers)
                 writer.writeheader()
                 writer.writerows(model.to_rows())
-                print(f"Записал {model.symbol} в csv")
+                logger.info('%s записан в tickers/%s.csv', model.symbol, model.symbol)
         finally:
             queue.task_done()
 
