@@ -68,11 +68,16 @@ def csv_writer(queue: Queue):
     while True:
         try:
             model: Ticker = queue.get()
+            if model is None:
+                break
+            
             with open(f"tickers/{model.symbol}.csv", "w", newline="") as file:
                 writer = DictWriter(file, fieldnames=model.headers)
                 writer.writeheader()
                 writer.writerows(model.to_rows())
-                logger.info('%s записан в tickers/%s.csv', model.symbol, model.symbol)
+                logger.info("%s записан в tickers/%s.csv", model.symbol, model.symbol)
+        except Exception as e:
+            logger.error("Ошибка во время записи в csv: %s", e)
         finally:
             queue.task_done()
 
@@ -82,13 +87,11 @@ def main():
     Thread(target=csv_writer, args=[work_queue], daemon=True).start()
 
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [
+        for ticker in get_ticker(TICKERS_FILE):
             executor.submit(worker, ticker, work_queue)
-            for ticker in get_ticker(TICKERS_FILE)
-        ]
-        for f in futures:
-            f.result()
+
     work_queue.join()
+    work_queue.put(None)
 
 
 if __name__ == "__main__":
