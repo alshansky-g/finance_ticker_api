@@ -6,13 +6,26 @@ from pathlib import Path
 from queue import Queue
 from threading import Thread
 import requests
+import requests.adapters
 from config import get_config
 from config_logging import get_logger
 from schemas import Ticker
+from urllib3.util.retry import Retry
 
 
 logger = get_logger(__name__)
 config = get_config()
+
+session = requests.Session()
+retry = Retry(
+    total=3,
+    backoff_factor=1,
+    backoff_jitter=0.5,
+    respect_retry_after_header=True,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = requests.adapters.HTTPAdapter(max_retries=retry)
+session.mount("https://", adapter)
 
 
 def get_ticker(file: str) -> Iterator[str]:
@@ -43,19 +56,24 @@ def get_history_data(
         "interval": interval,
         "includeAdjustedClose": "true",
     }
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-    response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, params=params)
+    url = f"{config.base_url}{ticker}"
+    response = session.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0"},
+        params=params,
+        timeout=(5, 15),
+    )
     return response.json()
 
 
-def ticker_parser(ticker_name: str, queue: Queue):
+def ticker_parser(*, ticker_name: str, queue: Queue):
     try:
         ticker = Ticker.model_validate(
             get_history_data(
                 ticker=ticker_name,
                 start_date=config.start_date,
                 end_date=config.end_date,
-                interval=config.interval
+                interval=config.interval,
             )
         )
         queue.put(ticker)
@@ -65,7 +83,7 @@ def ticker_parser(ticker_name: str, queue: Queue):
         logger.error("Не получилось обработать %s: %s", ticker.symbol, e)
 
 
-def csv_writer(queue: Queue):
+def csv_writer(*, queue: Queue):
     Path("tickers").mkdir(parents=True, exist_ok=True)
     while True:
         try:
@@ -86,11 +104,12 @@ def csv_writer(queue: Queue):
 
 def parse_tickers_api():
     work_queue = Queue()
-    Thread(target=csv_writer, args=[work_queue], daemon=True).start()
+
+    Thread(target=csv_writer, kwargs={'queue': work_queue}, daemon=True).start()
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         for ticker in get_ticker(config.tickers_file):
-            executor.submit(ticker_parser, ticker, work_queue)
+            executor.submit(ticker_parser, ticker_name=ticker, queue=work_queue)
 
     work_queue.join()
     work_queue.put(None)
