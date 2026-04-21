@@ -1,0 +1,97 @@
+# api_tickers
+
+Учебный проект по многопоточности/многопроцессности в Python. Скачивает исторические котировки акций с Yahoo Finance, сохраняет в CSV и строит интерактивный график нормализованных цен.
+
+## Что внутри
+
+Проект демонстрирует **два разных параллельных паттерна** на одной задаче:
+
+1. **Стадия загрузки (`api_parser.py`)** — `ThreadPoolExecutor` (5 воркеров) качает данные по HTTP, отдельный `Thread`-writer через `Queue` пишет результаты в CSV. Классический producer/consumer: сеть параллелится потоками, запись сериализована одним воркером.
+2. **Стадия парсинга (`csv_parser.py`)** — `InterpreterPoolExecutor` (8 воркеров, Python 3.14+) читает CSV-файлы в **изолированных субинтерпретаторах** и возвращает нормализованные серии через `Future.result()`. Демонстрирует передачу данных между интерпретаторами без shared state.
+
+График строится в Plotly (`plot.py`) по собранному словарю `{ticker: (dates, prices)}`.
+
+## Требования
+
+- Python **3.14+** (нужен `concurrent.futures.InterpreterPoolExecutor`)
+- [`uv`](https://docs.astral.sh/uv/) для управления зависимостями
+
+## Установка
+
+```bash
+uv sync
+```
+
+Создай файл `.env` в корне проекта:
+
+```env
+TICKERS_FILE=tickers.txt
+BASE_URL=https://query1.finance.yahoo.com/v8/finance/chart
+START_DATE=01.01.20
+INTERVAL=1wk
+LOG_LEVEL=INFO
+```
+
+Список тикеров задаётся в `tickers.txt` (по одному на строку).
+
+## Запуск
+
+**Полный цикл** (скачать данные с API → построить график):
+```bash
+uv run main.py update
+```
+Любой непустой аргумент запускает стадию загрузки. Если CSV-файлы уже есть в `tickers/`, повторное скачивание не нужно.
+
+**Только построение графика** (использует уже скачанные CSV):
+```bash
+uv run main.py
+```
+
+**Отдельные стадии:**
+```bash
+uv run api_parser.py   # только скачивание
+uv run csv_parser.py   # только парсинг (печатает dict)
+uv run plot.py         # только график
+```
+
+## Структура
+
+```
+api_tickers/
+├── main.py              # точка входа
+├── api_parser.py        # HTTP-загрузка через ThreadPoolExecutor + Queue
+├── csv_parser.py        # парсинг CSV через InterpreterPoolExecutor
+├── plot.py              # построение графика Plotly
+├── schemas.py           # Pydantic-модель Ticker для ответа Yahoo Finance
+├── config.py            # конфиг из .env (dataclass)
+├── config_logging.py    # логгер (stdout + logs/errors.log)
+├── tickers.txt          # список тикеров
+├── tickers/             # скачанные CSV (создаётся автоматически)
+└── logs/                # файлы логов
+```
+
+## Формат данных
+
+**CSV на тикер:**
+```
+date,open,high,low,close,adj_close,volume
+2020-01-01,74.06,75.22,73.19,74.60,71.93,509062400.0
+...
+```
+
+**После парсинга** (`get_tickers_info_for_plot`):
+```python
+{
+    "AAPL": (["2020-01-01", ...], [100.0, 102.3, ...]),
+    "TSLA": (["2020-01-01", ...], [100.0, 105.1, ...]),
+    ...
+}
+```
+Цены нормализованы к 100 от первого значения `adj_close` — ось Y показывает «% от стартовой цены», что делает тикеры с разным абсолютным уровнем сопоставимыми на одном графике.
+
+## Технические детали
+
+- **Yahoo Finance API** — неофициальный endpoint `query1.finance.yahoo.com/v8/finance/chart/{symbol}`. Не требует ключа, но требует `User-Agent` в заголовках.
+- **Нормализация:** `price_i * 100 / price_0`. Используется `adj_close`, а не `close`, чтобы устранить искажения от сплитов и дивидендов.
+- **Субинтерпретаторы:** данные между воркером и главным потоком передаются через сериализацию (аналогично `ProcessPoolExecutor`), поэтому возвращаемые значения должны быть picklable — `(str, list[str], list[float])` подходит.
+- **Poison pill** в `api_parser.py`: `None` в очереди сигналит CSV-writer'у о завершении работы после `queue.join()`.

@@ -4,7 +4,7 @@ from csv_parser import get_tickers_info_for_plot
 from plot import show_chart
 
 
-if len(argv) > 1:
+if len(argv) > 1 and argv[1] == 'update':
     parse_tickers_api()
 
 tickers_info = get_tickers_info_for_plot()
