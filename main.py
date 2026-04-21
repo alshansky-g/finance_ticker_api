@@ -1,98 +1,11 @@
-from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
-from csv import DictWriter
-from datetime import UTC, datetime
-from pathlib import Path
-from queue import Queue
-from threading import Thread
-import requests
-from config_logging import get_logger
-from schemas import Ticker
+from sys import argv
+from api_parser import parse_tickers_api
+from csv_parser import get_tickers_info_for_plot
+from plot import show_chart
 
 
-logger = get_logger(__name__)
+if len(argv) > 1:
+    parse_tickers_api()
 
-TICKERS_FILE = "tickers.txt"
-BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
-START_DATE = "01.01.20"
-END_DATE = datetime.now(UTC).strftime("%d.%m.%y")
-
-
-def get_ticker(file: str) -> Iterator[str]:
-    with open(file, encoding="utf-8") as tickers:
-        for ticker in tickers:
-            yield ticker.strip()
-
-
-def get_history_data(
-    *, ticker: str, start_date: str, end_date: str, interval: str = "1wk"
-):
-    """
-    Получает исторические данные для указанного тикера актива.
-
-    :param ticker: str, тикер актива.
-    :param start_date: str, дата начала периода в формате 'дд.мм.гг'.
-    :param end_date: str, дата окончания периода в формате 'дд.мм.гг'.
-    :param interval: str, интервал времени (неделя, день и т.д.) (необязательный, по умолчанию '1wk' - одна неделя).
-    :return: str, JSON-строка с историческими данными.
-    """
-    per2 = int(datetime.strptime(end_date, "%d.%m.%y").replace(tzinfo=UTC).timestamp())
-    per1 = int(
-        datetime.strptime(start_date, "%d.%m.%y").replace(tzinfo=UTC).timestamp()
-    )
-    params = {
-        "period1": str(per1),
-        "period2": str(per2),
-        "interval": interval,
-        "includeAdjustedClose": "true",
-    }
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-    response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, params=params)
-    return response.json()
-
-
-def worker(ticker_name: str, queue: Queue):
-    try:
-        ticker = Ticker.model_validate(
-            get_history_data(ticker=ticker_name, start_date=START_DATE, end_date=END_DATE)
-        )
-        queue.put(ticker)
-    except requests.RequestException as e:
-        logger.error("Проблема с сетью при обработке %s: %s", ticker.symbol, e)
-    except Exception as e:
-        logger.error("Не получилось обработать %s: %s", ticker.symbol, e)
-
-
-def csv_writer(queue: Queue):
-    Path("tickers").mkdir(parents=True, exist_ok=True)
-    while True:
-        try:
-            ticker: Ticker = queue.get()
-            if ticker is None:
-                break
-
-            with open(f"tickers/{ticker.symbol}.csv", "w", newline="") as file:
-                writer = DictWriter(file, fieldnames=ticker.fieldnames)
-                writer.writeheader()
-                writer.writerows(ticker.to_rows())
-                logger.info("%s записан в tickers/%s.csv", ticker.symbol, ticker.symbol)
-        except Exception as e:
-            logger.error("Ошибка во время записи в csv: %s", e)
-        finally:
-            queue.task_done()
-
-
-def main():
-    work_queue = Queue()
-    Thread(target=csv_writer, args=[work_queue], daemon=True).start()
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        for ticker in get_ticker(TICKERS_FILE):
-            executor.submit(worker, ticker, work_queue)
-
-    work_queue.join()
-    work_queue.put(None)
-
-
-if __name__ == "__main__":
-    main()
+tickers_info = get_tickers_info_for_plot()
+show_chart(tickers_info)
