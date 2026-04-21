@@ -12,6 +12,7 @@ class Config:
     base_url: str
     start_date: str
     log_level: str
+    interval: str
     end_date: str = field(init=False)
 
     def __post_init__(self):
@@ -23,7 +24,8 @@ def get_config() -> Config:
         tickers_file=os.environ["TICKERS_FILE"],
         base_url=os.environ["BASE_URL"],
         start_date=os.environ["START_DATE"],
-        log_level=os.environ['LOG_LEVEL']
+        log_level=os.environ['LOG_LEVEL'],
+        interval=os.environ['INTERVAL']
     )
 
 

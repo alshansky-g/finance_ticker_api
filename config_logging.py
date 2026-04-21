@@ -1,6 +1,7 @@
 from logging import FileHandler, Formatter, StreamHandler, getLogger
 import logging
 from pathlib import Path
+from config import config
 import sys
 
 
@@ -8,7 +9,7 @@ def get_logger(name: str):
     Path('logs').mkdir(exist_ok=True)
 
     logger = getLogger(name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(config.log_level)
     fmt = Formatter('%(asctime)s | %(levelname)-5s | %(message)s', datefmt='%d.%m.%YT%H:%M:%S %z')
 
     file_handler = FileHandler('logs/errors.log', encoding='utf-8', delay=True)

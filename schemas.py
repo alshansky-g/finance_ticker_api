@@ -54,6 +54,6 @@ class Ticker(BaseModel):
             for i, t in enumerate(self.timestamps)
         ]
 
-    @property
-    def fieldnames(self) -> list[str]:
+    @staticmethod
+    def fieldnames() -> list[str]:
         return ["date", "open", "high", "low", "close", "adj_close", "volume"]
